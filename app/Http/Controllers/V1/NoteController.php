@@ -44,12 +44,12 @@ class NoteController extends Controller
         $note = Note::where('user_id', $user_id)->first();
 
         if($note === null) {
-            Note::create($request->all());
+            Note::create(['user_id' => $user_id, 'json_content' => $json_content]);
         } else {
-            $note->update($request->all());
+            $note->update(['user_id' => $user_id, 'json_content' => $json_content]);
         }
 
-        return response()->json(['response_code' => 200, 'response_message' => 'Note created successfully.'], 200);
+        return response()->json(['response_code' => 200, 'response_message' => 'Note created / Updated successfully.'], 200);
 
     }
 
