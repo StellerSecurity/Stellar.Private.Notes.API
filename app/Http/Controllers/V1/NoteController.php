@@ -58,15 +58,7 @@ class NoteController extends Controller
 
         $user_id = $request->input('user_id');
 
-        if(empty($user_id)) {
-            return response()->json(['response_code' => 400, 'response_message' => 'User ID  is empty.'], 400);
-        }
-
         $note = Note::where('user_id', $user_id)->first();
-
-        if($note === null) {
-            return response()->json(['response_code' => 400, 'response_message' => 'Note info not found'], 400);
-        }
 
         return response()->json($note, 200);
 
