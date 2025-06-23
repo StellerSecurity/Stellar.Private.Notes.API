@@ -7,4 +7,5 @@ Route::prefix('V1/notecontroller')->group(function () {
     Route::post('/create', [\App\Http\Controllers\V1\NoteController::class, 'create']);
     Route::post('/find', [\App\Http\Controllers\V1\NoteController::class, 'find']);
     Route::delete('/delete', [\App\Http\Controllers\V1\NoteController::class, 'delete']);
+    Route::post('/updateorcreate', [\App\Http\Controllers\V1\NoteController::class, 'updateOrCreate']);
 });

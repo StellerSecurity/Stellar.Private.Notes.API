@@ -31,6 +31,28 @@ class NoteController extends Controller
 
     }
 
+    public function updateOrCreate(Request $request): JsonResponse
+    {
+
+        $user_id = $request->input('user_id');
+        $json_content = $request->input('json_content');
+
+        if(empty($user_id) || empty($json_content)) {
+            return response()->json(['response_code' => 400, 'response_message' => 'User ID or json_content is empty.'], 400);
+        }
+
+        $note = Note::where('user_id', $user_id)->first();
+
+        if($note === null) {
+            Note::create($request->all());
+        } else {
+            $note->update($request->all());
+        }
+
+        return response()->json(['response_code' => 200, 'response_message' => 'Note created successfully.'], 200);
+
+    }
+
     public function find(Request $request): JsonResponse
     {
 
