@@ -35,7 +35,7 @@ class NoteController extends Controller
     {
 
         $user_id = $request->input('user_id');
-        $json_content = $request->input('json_content');
+        $json_content = base64_decode($request->input('json_content'));
 
         if(empty($user_id) || empty($json_content)) {
             return response()->json(['response_code' => 400, 'response_message' => 'User ID or json_content is empty.'], 400);
