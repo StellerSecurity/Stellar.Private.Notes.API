@@ -14,6 +14,7 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->use([
             \App\Http\Middleware\BasicAuthentication::class,
+            'idempotency'  => \App\Http\Middleware\Idempotency::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

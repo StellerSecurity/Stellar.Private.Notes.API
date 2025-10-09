@@ -1,11 +1,8 @@
 <?php
 
+use App\Http\Middleware\Idempotency;
 use Illuminate\Support\Facades\Route;
 
-Route::prefix('v1/notecontroller')->group(function () {
-    Route::patch('/update', [\App\Http\Controllers\V1\NoteController::class, 'update']);
-    Route::post('/create', [\App\Http\Controllers\V1\NoteController::class, 'create']);
-    Route::post('/find', [\App\Http\Controllers\V1\NoteController::class, 'find']);
-    Route::delete('/delete', [\App\Http\Controllers\V1\NoteController::class, 'delete']);
-    Route::post('/updateorcreate', [\App\Http\Controllers\V1\NoteController::class, 'updateOrCreate']);
-});
+Route::post('/v1/notecontroller/sync-plan', [\App\Http\Controllers\V1\NoteController::class, 'plan']);
+Route::post('/v1/notecontroller/upload',    [App\Http\Controllers\V1\NoteController::class, 'upload'])->middleware(Idempotency::class);
+Route::post('/v1/notecontroller/download',  [App\Http\Controllers\V1\NoteController::class, 'download']);
