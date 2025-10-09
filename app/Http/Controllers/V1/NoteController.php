@@ -11,6 +11,11 @@ use Illuminate\Support\Facades\DB;
 class NoteController extends Controller
 {
 
+    public function find(Request $request) {
+        $note = Note::find($request->input('id'));
+        return response()->json($note);
+    }
+
     public function plan(Request $req)
     {
         $userId = (int) $req->attributes->get('auth_user_id');
