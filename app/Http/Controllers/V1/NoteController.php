@@ -12,7 +12,7 @@ class NoteController extends Controller
 {
 
     public function find(Request $request) {
-        $note = Note::find($request->input('id'));
+        $note = Note::where('note_id',$request->input('id'))->first();
         return response()->json($note);
     }
 
