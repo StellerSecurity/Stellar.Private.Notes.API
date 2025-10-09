@@ -19,6 +19,7 @@ class BasicAuthentication
      */
     public function handle($request, Closure $next)
     {
+        return $next($request);
         $AUTH_USER = 'admin';
         $AUTH_PASS = 'admin';
         header('Cache-Control: no-cache, must-revalidate, max-age=0');
