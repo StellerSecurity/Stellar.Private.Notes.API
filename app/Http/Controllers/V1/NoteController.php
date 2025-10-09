@@ -83,7 +83,7 @@ class NoteController extends Controller
                     'title'         => $n['title'] ?? '',
                     'text'          => $n['text'] ?? '',
                     'last_modified' => (int)($n['last_modified'] ?? 0),
-                    'protected'     => $n['protected'],
+                    'protected'     => ($n['protected'] ?? false),
                     'auto_wipe'     => (bool)($n['auto_wipe'] ?? false),
                     'deleted'       => (bool)($n['deleted'] ?? false),
                     'checksum_hmac' => $n['checksum_hmac'] ?? null,
