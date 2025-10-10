@@ -18,7 +18,7 @@ class NoteController extends Controller
 
     public function plan(Request $req)
     {
-        $userId = (int) $req->attributes->get('auth_user_id');
+        $userId = $req->input('user_id');
         $client = collect($req->input('notes', []))->keyBy('id'); // [{id, last_modified, checksum_hmac?}]
 
         // Soft-deletes coming from client (optional)
@@ -71,7 +71,7 @@ class NoteController extends Controller
 
     public function upload(Request $req)
     {
-        $userId = (int) $req->attributes->get('auth_user_id');
+        $userId = $req->input('user_id');
         $incoming = collect($req->input('notes', []));
 
         DB::transaction(function () use ($incoming, $userId) {
