@@ -19,7 +19,6 @@ class BasicAuthentication
      */
     public function handle($request, Closure $next)
     {
-        return $next($request);
         $AUTH_USER = 'admin';
         $AUTH_PASS = 'admin';
         header('Cache-Control: no-cache, must-revalidate, max-age=0');
@@ -29,7 +28,6 @@ class BasicAuthentication
             $_SERVER['PHP_AUTH_USER'] == env('API_USERNAME') ||
             $_SERVER['PHP_AUTH_PW']   == env('API_PASSWORD')
         );
-        $is_not_authenticated = false;
         if ($is_not_authenticated) {
             header('HTTP/1.1 401 Authorization Required');
             header('WWW-Authenticate: Basic realm="Access denied"');
