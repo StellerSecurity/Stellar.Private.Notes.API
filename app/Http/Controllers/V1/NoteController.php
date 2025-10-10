@@ -110,7 +110,7 @@ class NoteController extends Controller
 
     public function download(Request $req)
     {
-        $userId = (int) $req->attributes->get('auth_user_id');
+        $userId = $req->input('user_id');
         $ids = (array) $req->input('ids', []);
 
         $notes = Note::where('user_id',$userId)
