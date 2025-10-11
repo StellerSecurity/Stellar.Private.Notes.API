@@ -15,13 +15,13 @@ return new class extends Migration
             $t->id();
             $t->unsignedBigInteger('user_id');
             $t->uuid('note_id');                 // from "id"
-            $t->string('title');
+            $t->longText('title');
             $t->longText('text');                // swap to ciphertext later if E2EE
             $t->unsignedBigInteger('last_modified'); // epoch ms from client
             $t->boolean('protected')->default(false);
             $t->boolean('auto_wipe')->default(false);
             $t->boolean('deleted')->default(false);  // tombstone for deletes
-            $t->string('checksum_hmac', 128)->nullable(); // optional
+            $t->string(128, 'checksum_hmac')->nullable(); // optional
             $t->timestampsTz();
 
             $t->unique(['user_id','note_id']);
