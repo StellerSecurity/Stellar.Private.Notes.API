@@ -21,7 +21,7 @@ return new class extends Migration
             $t->boolean('protected')->default(false);
             $t->boolean('auto_wipe')->default(false);
             $t->boolean('deleted')->default(false);  // tombstone for deletes
-            $t->string(128, 'checksum_hmac')->nullable(); // optional
+            $t->string('checksum_hmac', 128)->nullable();
             $t->timestampsTz();
 
             $t->unique(['user_id','note_id']);
