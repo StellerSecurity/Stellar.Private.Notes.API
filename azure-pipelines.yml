@@ -81,6 +81,3 @@ stages:
               appType: 'webAppLinux'
               WebAppName: '$(webAppName)'
               packageForLinux: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
-              ScriptType: 'Inline Script'
-              InlineScript: |
-                php artisan migrate --force
