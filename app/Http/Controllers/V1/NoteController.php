@@ -86,6 +86,8 @@ class NoteController extends Controller
                     'protected'     => ($n['protected'] ?? false),
                     'auto_wipe'     => (bool)($n['auto_wipe'] ?? false),
                     'deleted'       => (bool)($n['deleted'] ?? false),
+                    'pinned'        => (bool)($n['pinned'] ?? false),
+                    'favorite'      => (bool)($n['favorite'] ?? false),
                     'checksum_hmac' => $n['checksum_hmac'] ?? null,
                 ];
 
@@ -123,6 +125,8 @@ class NoteController extends Controller
                 'protected'     => (bool)$n->protected,
                 'auto_wipe'     => (bool)$n->auto_wipe,
                 'deleted'       => (bool)$n->deleted,
+                'pinned'        => (bool)$n->pinned,
+                'favorite'      => (bool)$n->favorite,
                 'checksum_hmac' => $n->checksum_hmac,
             ])->values();
 
