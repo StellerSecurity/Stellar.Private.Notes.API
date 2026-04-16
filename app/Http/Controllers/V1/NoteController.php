@@ -13,10 +13,14 @@ use Illuminate\Support\Str;
 class NoteController extends Controller
 {
     public function find(Request $request) {
-        $note = Note::with('folderEntity')->where('note_id',$request->input('id'))->first();
+        $note = $this->canonicalNoteQuery((int) $request->input('user_id'))
+            ->where('note_id', $request->input('id'))
+            ->first();
+
         if ($note) {
             $note->folder = $note->folderEntity?->name ?? $note->folder;
         }
+
         return response()->json($note);
     }
 
@@ -57,13 +61,15 @@ class NoteController extends Controller
             );
         }
 
-        $server = Note::where('user_id', $userId)
+        $server = $this->canonicalNoteQuery($userId)
             ->whereIn('note_id', $client->keys())
-            ->get()->keyBy('note_id');
+            ->get()
+            ->keyBy('note_id');
 
-        $serverFolders = Folder::where('user_id', $userId)
+        $serverFolders = $this->canonicalFolderQuery($userId)
             ->whereIn('folder_id', $clientFolders->keys())
-            ->get()->keyBy('folder_id');
+            ->get()
+            ->keyBy('folder_id');
 
         $upload = []; $download = []; $noop = []; $conflicts = [];
         foreach ($client as $id => $c) {
@@ -102,10 +108,10 @@ class NoteController extends Controller
             }
         }
 
-        $serverNew = Note::where('user_id', $userId)->pluck('note_id')->diff($client->keys());
+        $serverNew = $this->canonicalNoteQuery($userId)->pluck('note_id')->diff($client->keys());
         $download = array_values(array_unique(array_merge($download, $serverNew->all())));
 
-        $serverNewFolders = Folder::where('user_id', $userId)->pluck('folder_id')->diff($clientFolders->keys());
+        $serverNewFolders = $this->canonicalFolderQuery($userId)->pluck('folder_id')->diff($clientFolders->keys());
         $folderDownload = array_values(array_unique(array_merge($folderDownload, $serverNewFolders->all())));
 
         return response()->json([
@@ -196,8 +202,8 @@ class NoteController extends Controller
         $ids = (array) $req->input('ids', []);
         $folderIds = (array) $req->input('folder_ids', []);
 
-        $notes = Note::with('folderEntity')
-            ->where('user_id',$userId)
+        $notes = $this->canonicalNoteQuery($userId)
+            ->with('folderEntity')
             ->when($ids, fn($q)=>$q->whereIn('note_id',$ids))
             ->get()->map(fn($n)=>[
                 'id'            => $n->note_id,
@@ -214,7 +220,7 @@ class NoteController extends Controller
                 'folder'        => $n->folderEntity?->name ?? $n->folder ?? '',
             ])->values();
 
-        $folders = Folder::where('user_id', $userId)
+        $folders = $this->canonicalFolderQuery($userId)
             ->when($folderIds, fn($q) => $q->whereIn('folder_id', $folderIds))
             ->get()->map(fn($f) => [
                 'id' => $f->folder_id,
@@ -224,6 +230,29 @@ class NoteController extends Controller
             ])->values();
 
         return response()->json(['notes' => $notes, 'folders' => $folders]);
+    }
+
+
+    private function canonicalNoteQuery(int|string $userId)
+    {
+        return Note::where('user_id', $userId)
+            ->orderBy('last_modified', 'desc')
+            ->orderBy('id', 'desc')
+            ->get()
+            ->unique('note_id')
+            ->values()
+            ->toQuery();
+    }
+
+    private function canonicalFolderQuery(int|string $userId)
+    {
+        return Folder::where('user_id', $userId)
+            ->orderBy('last_modified', 'desc')
+            ->orderBy('id', 'desc')
+            ->get()
+            ->unique('folder_id')
+            ->values()
+            ->toQuery();
     }
 
     private function resolveFolderForIncomingNote(int|string $userId, array $note): array
