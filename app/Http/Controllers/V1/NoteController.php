@@ -17,11 +17,19 @@ class NoteController extends Controller
             ->where('note_id', $request->input('id'))
             ->first();
 
-        if ($note) {
-            $note->folder = $note->folderEntity?->name ?? $note->folder;
+        if (! $note) {
+            return response()->json(null);
         }
 
-        return response()->json($note);
+        // Preserve the legacy model-shaped response for older clients, but make
+        // the public `id` match the UUID they use for every note operation.
+        $payload = $note->toArray();
+        $payload['database_id'] = $payload['id'];
+        $payload['id'] = $note->note_id;
+        $payload['note_id'] = $note->note_id;
+        $payload['folder'] = $note->folderEntity?->name ?? $note->folder ?? '';
+
+        return response()->json($payload);
     }
 
     public function plan(Request $req)
