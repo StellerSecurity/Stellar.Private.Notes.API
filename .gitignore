@@ -24,3 +24,5 @@ Homestead.yaml
 Thumbs.db
 /storage/framework/views/*
 /storage/framework/sessions/*
+# Markdown documentation stays local and must not be committed to GitHub.
+*.[mM][dD]
