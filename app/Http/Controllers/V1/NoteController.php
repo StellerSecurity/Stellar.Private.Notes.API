@@ -243,24 +243,27 @@ class NoteController extends Controller
 
     private function canonicalNoteQuery(int|string $userId)
     {
-        return Note::where('user_id', $userId)
+        $ids = Note::where('user_id', $userId)
             ->orderBy('last_modified', 'desc')
             ->orderBy('id', 'desc')
             ->get()
             ->unique('note_id')
-            ->values()
-            ->toQuery();
+            ->modelKeys();
+
+        // whereKey([]) safely returns no rows; an empty collection cannot toQuery().
+        return Note::where('user_id', $userId)->whereKey($ids);
     }
 
     private function canonicalFolderQuery(int|string $userId)
     {
-        return Folder::where('user_id', $userId)
+        $ids = Folder::where('user_id', $userId)
             ->orderBy('last_modified', 'desc')
             ->orderBy('id', 'desc')
             ->get()
             ->unique('folder_id')
-            ->values()
-            ->toQuery();
+            ->modelKeys();
+
+        return Folder::where('user_id', $userId)->whereKey($ids);
     }
 
     private function resolveFolderForIncomingNote(int|string $userId, array $note): array
