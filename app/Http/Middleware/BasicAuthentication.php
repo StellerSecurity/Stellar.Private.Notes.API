@@ -4,36 +4,37 @@ namespace App\Http\Middleware;
 
 use Closure;
 use Illuminate\Http\Request;
-use Symfony\Component\HttpFoundation\Response;
-
-use Symfony\Component\HttpKernel\Exception\HttpException;
 
 class BasicAuthentication
 {
-    /**
-     * Handle an incoming request.
-     *
-     * @param Request $request
-     * @param  \Closure  $next
-     * @return mixed
-     */
-    public function handle($request, Closure $next)
+    public function handle(Request $request, Closure $next)
     {
-        $AUTH_USER = 'admin';
-        $AUTH_PASS = 'admin';
-        header('Cache-Control: no-cache, must-revalidate, max-age=0');
-        $has_supplied_credentials = !(empty($_SERVER['PHP_AUTH_USER']) && empty($_SERVER['PHP_AUTH_PW']));
-        $is_not_authenticated = (
-            !$has_supplied_credentials ||
-            $_SERVER['PHP_AUTH_USER'] == env('API_USERNAME') ||
-            $_SERVER['PHP_AUTH_PW']   == env('API_PASSWORD')
-        );
-        if ($is_not_authenticated) {
-            header('HTTP/1.1 401 Authorization Required');
-            header('WWW-Authenticate: Basic realm="Access denied"');
-            exit;
+        $username = config('notes_service.username');
+        $password = config('notes_service.password');
+        if (!is_string($username) || $username === '' || !is_string($password) || $password === '') {
+            // A missing server secret must never make this internal API public.
+            return response()->json(['response_message' => 'Notes service unavailable'], 503);
         }
+
+        $suppliedUser = $request->getUser();
+        $suppliedPassword = $request->getPassword();
+        $userMatches = is_string($suppliedUser) && hash_equals($username, $suppliedUser);
+        $passwordMatches = is_string($suppliedPassword) && hash_equals($password, $suppliedPassword);
+        if (!$userMatches || !$passwordMatches) {
+            return response()->json(['response_message' => 'Unauthorized'], 401, [
+                'WWW-Authenticate' => 'Basic realm="Notes service"',
+                'Cache-Control' => 'no-store',
+            ]);
+        }
+
+        // Only the authenticated service may supply the end-user identity.
+        // The public proxy derives this field from the Stellar ID token.
+        $userId = $request->input('user_id');
+        if ((!is_int($userId) && !is_string($userId)) ||
+            filter_var($userId, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false) {
+            return response()->json(['response_message' => 'Invalid user identity'], 422);
+        }
+        $request->attributes->set('auth_user_id', (int)$userId);
         return $next($request);
     }
-
 }

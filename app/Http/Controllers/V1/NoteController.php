@@ -5,6 +5,7 @@ namespace App\Http\Controllers\V1;
 use App\Http\Controllers\Controller;
 use App\Models\Folder;
 use App\Models\Note;
+use App\Support\KnownNotes;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -14,6 +15,7 @@ class NoteController extends Controller
 {
     public function find(Request $request) {
         $note = $this->canonicalNoteQuery((int) $request->input('user_id'))
+            ->with(['folderEntity' => fn($q) => $q->where('user_id', $request->input('user_id'))])
             ->where('note_id', $request->input('id'))
             ->first();
 
@@ -24,6 +26,7 @@ class NoteController extends Controller
         // Preserve the legacy model-shaped response for older clients, but make
         // the public `id` match the UUID they use for every note operation.
         $payload = $note->toArray();
+        unset($payload['folder_entity']); // Keep the legacy find response shape.
         $payload['database_id'] = $payload['id'];
         $payload['id'] = $note->note_id;
         $payload['note_id'] = $note->note_id;
@@ -139,8 +142,9 @@ class NoteController extends Controller
         $userId = $req->input('user_id');
         $incomingFolders = collect($req->input('folders', []));
         $incoming = collect($req->input('notes', []));
+        $confirmed = true;
 
-        DB::transaction(function () use ($incomingFolders, $incoming, $userId) {
+        DB::transaction(function () use ($incomingFolders, $incoming, $userId, &$confirmed) {
             foreach ($incomingFolders as $f) {
                 $id = $f['id'] ?? null;
                 if (!$id) {
@@ -171,7 +175,40 @@ class NoteController extends Controller
                 $id = $n['id'];
                 $existing = Note::where('user_id',$userId)->where('note_id',$id)->lockForUpdate()->first();
 
-                [$resolvedFolderId, $resolvedFolderName] = $this->resolveFolderForIncomingNote($userId, $n);
+                // Reject stale replays before folder resolution can change shared metadata.
+                if ($existing && (int)($n['last_modified'] ?? 0) <= (int)$existing->last_modified) {
+                    $sameVersion = (int)($n['last_modified'] ?? 0) === (int)$existing->last_modified;
+                    $sameContent = !empty($n['checksum_hmac'])
+                        ? hash_equals((string)($existing->checksum_hmac ?? ''), (string)$n['checksum_hmac'])
+                        : ($n['text'] ?? '') === $existing->text && ($n['title'] ?? '') === $existing->title;
+                    foreach (['protected', 'auto_wipe', 'deleted', 'pinned', 'favorite'] as $field) {
+                        if (array_key_exists($field, $n) && (bool)$n[$field] !== (bool)$existing->{$field}) {
+                            $sameContent = false;
+                        }
+                    }
+                    if (array_key_exists('folder_id', $n) && ($n['folder_id'] ?? null) !== $existing->folder_id) {
+                        $sameContent = false;
+                    }
+                    $confirmed = $confirmed && $sameVersion && $sameContent;
+                    continue;
+                }
+
+                if ($existing) {
+                    // Older releases do not send newer metadata. Missing is not false.
+                    foreach (['title', 'protected', 'auto_wipe', 'deleted', 'pinned', 'favorite'] as $field) {
+                        if (!array_key_exists($field, $n)) {
+                            $n[$field] = $existing->{$field};
+                        }
+                    }
+                }
+
+                // Missing folder metadata must not rename a shared folder using stale note data.
+                if ($existing && !array_key_exists('folder_id', $n) && !array_key_exists('folder', $n)) {
+                    [$resolvedFolderId, $resolvedFolderName] = [$existing->folder_id, $existing->folder];
+                } else {
+                    // An explicit folder value (including an empty one) still means move/clear.
+                    [$resolvedFolderId, $resolvedFolderName] = $this->resolveFolderForIncomingNote($userId, $n);
+                }
 
                 $payload = [
                     'title'         => $n['title'] ?? '',
@@ -201,6 +238,10 @@ class NoteController extends Controller
             }
         });
 
+        // Only clients explicitly requesting confirmation receive the extended contract.
+        if ($req->input('require_note_ack') === true) {
+            return response()->json(['ok' => $confirmed, 'note_ack_v1' => $confirmed], $confirmed ? 200 : 409);
+        }
         return response()->json(['ok' => true]);
     }
 
@@ -209,11 +250,17 @@ class NoteController extends Controller
         $userId = $req->input('user_id');
         $ids = (array) $req->input('ids', []);
         $folderIds = (array) $req->input('folder_ids', []);
+        // Older apps omit this field and receive the unchanged full response.
+        $knownNotes = $req->input('known_notes');
 
         $notes = $this->canonicalNoteQuery($userId)
-            ->with('folderEntity')
+            ->with(['folderEntity' => fn($q) => $q->where('user_id', $userId)])
             ->when($ids, fn($q)=>$q->whereIn('note_id',$ids))
-            ->get()->map(fn($n)=>[
+            ->get()
+            ->filter(fn($n) => KnownNotes::shouldDownload(
+                $knownNotes, (string)$n->note_id, (int)$n->last_modified, (bool)$n->deleted
+            ))
+            ->map(fn($n)=>[
                 'id'            => $n->note_id,
                 'title'         => $n->title,
                 'last_modified' => (int)$n->last_modified,
@@ -246,7 +293,7 @@ class NoteController extends Controller
         $ids = Note::where('user_id', $userId)
             ->orderBy('last_modified', 'desc')
             ->orderBy('id', 'desc')
-            ->get()
+            ->get(['id', 'note_id'])
             ->unique('note_id')
             ->modelKeys();
 
@@ -259,7 +306,7 @@ class NoteController extends Controller
         $ids = Folder::where('user_id', $userId)
             ->orderBy('last_modified', 'desc')
             ->orderBy('id', 'desc')
-            ->get()
+            ->get(['id', 'folder_id'])
             ->unique('folder_id')
             ->modelKeys();
 
