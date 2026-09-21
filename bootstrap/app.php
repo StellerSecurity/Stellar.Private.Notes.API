@@ -13,7 +13,9 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->use([
-            'idempotency'  => \App\Http\Middleware\Idempotency::class,
+            // Preserve legacy empty strings and whitespace in encrypted payloads.
+            \Illuminate\Http\Middleware\HandleCors::class,
+            \Illuminate\Foundation\Http\Middleware\ValidatePostSize::class,
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
