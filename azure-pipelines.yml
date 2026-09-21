@@ -40,6 +40,13 @@ stages:
       workingDirectory: $(rootFolder)
       displayName: 'Use PHP version $(phpVersion)'
 
+    - script: |
+        set -e
+        php tests/controller-contract.php
+        php tests/known-notes-contract.php
+        php tests/security-contract.php
+      displayName: 'Check legacy compatibility and conflict contracts'
+
     - script: composer install --no-interaction --prefer-dist --optimize-autoloader
       workingDirectory: $(rootFolder)
       displayName: 'Composer install'
@@ -60,7 +67,7 @@ stages:
 - stage: Deploy
   displayName: 'Deploy Web App'
   dependsOn: Build
-  condition: succeeded()
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
   jobs:
   - deployment: DeploymentJob
     pool:

@@ -65,6 +65,7 @@ namespace Illuminate\Http {
 namespace Illuminate\Support\Facades { class DB {public static function transaction($fn) {return $fn();}} }
 namespace Illuminate\Support { class Str {public static function uuid() {return 'generated-folder';}} }
 namespace {
+    function config($key,$default=null) {return $key==='notes_conflicts.enabled' ? ($GLOBALS['conflictsEnabled']??true) : $default;}
     function collect($items) {return new \Contract\Rows($items);}
     function response() {return new class {function json($data,$status=200) {return new \Illuminate\Http\JsonResponse($data,$status);}};}
     function now() {return new class {function valueOf() {return 1000;}};}
@@ -101,6 +102,17 @@ namespace {
     check('stale upload cannot replace text',download()['notes'][0]['text']==='cipher-v4');
     upload([['id'=>'legacy','text'=>'','last_modified'=>500,'deleted'=>true]]);
     check('tombstones always delivered',download(['known_notes'=>['legacy'=>500]])['notes'][0]['deleted']===true);
+    foreach ([501, 9000000000000, 9000000000001, 9000000000002] as $deviceVersion) {
+        $replay=$controller->upload(request(['require_note_ack'=>true,'notes'=>[
+            ['id'=>'legacy','text'=>'offline device edit','last_modified'=>$deviceVersion,'deleted'=>false,'folder_id'=>'folder','folder'=>'Wrong rename']
+        ]]));
+        check('deleted UUID rejects device replay '.$deviceVersion,$replay->status===409);
+    }
+    $tombstone=download(['ids'=>['legacy']])['notes'][0];
+    check('four stale devices cannot restore deleted content',$tombstone['deleted']===true && $tombstone['text']==='' && $tombstone['last_modified']===500);
+    $legacyReplay=upload([['id'=>'legacy','text'=>'old app replay','last_modified'=>9999999999999]]);
+    check('legacy deleted-note replay keeps legacy response',$legacyReplay->data===['ok'=>true] && $legacyReplay->status===200);
+    check('legacy replay cannot resurrect deletion',download(['ids'=>['legacy']])['notes'][0]['deleted']===true);
     check('missing find retains legacy null',$controller->find(request(['id'=>'missing']))->data===null);
     $note=['id'=>'ack-note','text'=>'cipher-one','title'=>'title','last_modified'=>9000,'checksum_hmac'=>'stable-keyed-checksum'];
     $ack=$controller->upload(request(['require_note_ack'=>true,'notes'=>[$note]]));
@@ -124,5 +136,33 @@ namespace {
     check('find folder lookup scoped to note owner',$found['folder']==='My folder');
     $downloaded=download(['ids'=>['collision-note']]);
     check('download folder lookup scoped to note owner',$downloaded['notes'][0]['folder']==='My folder');
+
+    $first=['id'=>'four-devices','text'=>'initial','last_modified'=>100,'base_version'=>0,'edit_session'=>'desktop-111111111111'];
+    check('causal new note accepted',$controller->upload(request(['require_note_ack'=>true,'notes'=>[$first]]))->status===200);
+    $edit=$first; $edit['text']='desktop one'; $edit['last_modified']=200; $edit['base_version']=100;
+    check('first desktop edit accepted',$controller->upload(request(['require_note_ack'=>true,'notes'=>[$edit]]))->status===200);
+    foreach (['desktop-222222222222','mobile-1111111111111','mobile-2222222222222'] as $session) {
+        $stale=$edit; $stale['edit_session']=$session; $stale['last_modified']=9999999999999; $stale['text']='stale concurrent';
+        check('stale base rejected despite fast clock '.$session,$controller->upload(request(['require_note_ack'=>true,'notes'=>[$stale]]))->status===409);
+    }
+    check('first writer remains intact',download(['ids'=>['four-devices']])['notes'][0]['text']==='desktop one');
+    $edit['last_modified']=250; $edit['text']='continued same session';
+    check('same editor can continue without waiting for download',$controller->upload(request(['require_note_ack'=>true,'notes'=>[$edit]]))->status===200);
+    $second=$edit; $second['edit_session']='mobile-1111111111111'; $second['base_version']=250; $second['last_modified']=300;
+    check('explicit choice on fresh server version accepted',$controller->upload(request(['require_note_ack'=>true,'notes'=>[$second]]))->status===200);
+    $edit['last_modified']=400;
+    check('original session cannot overwrite intervening device',$controller->upload(request(['require_note_ack'=>true,'notes'=>[$edit]]))->status===409);
+    check('session identifier is absent from find',!array_key_exists('edit_session',$controller->find(request(['id'=>'four-devices']))->data));
+    $old=['id'=>'four-devices','last_modified'=>500,'text'=>'legacy client update'];
+    check('old clients can still edit guarded notes',upload([$old])->data===['ok'=>true]);
+    $second['last_modified']=600;
+    check('old client write invalidates previous modern session',$controller->upload(request(['require_note_ack'=>true,'notes'=>[$second]]))->status===409);
+    $invalid=$second; $invalid['base_version']='500';
+    check('malformed causal version rejected',$controller->upload(request(['require_note_ack'=>true,'notes'=>[$invalid]]))->status===409);
+
+    $GLOBALS['conflictsEnabled']=false;
+    upload([['id'=>'pre-migration','text'=>'safe before migration','last_modified'=>1,'base_version'=>0,'edit_session'=>'new-client-111111111']]);
+    $pre=\App\Models\Note::where('user_id',1)->where('note_id','pre-migration')->first();
+    check('disabled rollout does not write new database column',!array_key_exists('edit_session',$pre->data));
 
 }
