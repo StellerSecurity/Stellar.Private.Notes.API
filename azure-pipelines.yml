@@ -51,10 +51,29 @@ stages:
       workingDirectory: $(rootFolder)
       displayName: 'Composer install'
 
+    - script: |
+        set -eu
+        mkdir -p "$(Build.ArtifactStagingDirectory)/app"
+        for path in app artisan bootstrap config database default public resources routes vendor composer.json composer.lock; do
+          if [ -e "$path" ]; then
+            rsync -a --exclude='.git' --exclude='.env*' --exclude='auth.json' \
+              --exclude='*.[mM][dD]' --exclude='OPERATIONS.txt' \
+              --exclude='*.key' --exclude='*.pem' --exclude='*.sqlite' \
+              --exclude='hot' --exclude='storage' \
+              "$path" "$(Build.ArtifactStagingDirectory)/app/"
+          fi
+        done
+        mkdir -p "$(Build.ArtifactStagingDirectory)/app/storage/framework/cache/data" \
+          "$(Build.ArtifactStagingDirectory)/app/storage/framework/sessions" \
+          "$(Build.ArtifactStagingDirectory)/app/storage/framework/views" \
+          "$(Build.ArtifactStagingDirectory)/app/storage/logs"
+      workingDirectory: $(rootFolder)
+      displayName: 'Stage application files without repository metadata or local secrets'
+
     - task: ArchiveFiles@2
       displayName: 'Archive files'
       inputs:
-        rootFolderOrFile: '$(rootFolder)'
+        rootFolderOrFile: '$(Build.ArtifactStagingDirectory)/app'
         includeRootFolder: false
         archiveType: zip
         archiveFile: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip'
@@ -88,3 +107,8 @@ stages:
               appType: 'webAppLinux'
               WebAppName: '$(webAppName)'
               packageForLinux: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
+              ScriptType: 'Inline Script'
+              InlineScript: |
+                set -eu
+                cd /home/site/wwwroot
+                php artisan migrate --force --path=database/migrations/2026_09_22_000000_add_edit_session_to_notes.php
