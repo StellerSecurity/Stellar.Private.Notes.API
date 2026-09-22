@@ -78,6 +78,10 @@ stages:
       workingDirectory: $(rootFolder)
       displayName: 'Stage application files without repository metadata or local secrets'
 
+    - script: php tests/prepare-linux-artifact.php "$(Build.ArtifactStagingDirectory)/app"
+      workingDirectory: $(rootFolder)
+      displayName: 'Verify the production-only Linux deployment artifact'
+
     - task: ArchiveFiles@2
       displayName: 'Archive files'
       inputs:
