@@ -55,3 +55,25 @@ foreach ($files as $file) {
     }
 }
 echo "Linux deployment artifact: production-only dependencies, no Pint or native helper binaries.\n";
+
+// ZIP deployment can retain generated manifests from an older, dev-inclusive
+// installation. Ship fresh manifests so that first boot uses only this graph.
+$cacheDirectory = $root.'/bootstrap/cache';
+if (!is_dir($cacheDirectory) && !mkdir($cacheDirectory, 0755, true)) {
+    throw new RuntimeException('Could not create the staged bootstrap cache.');
+}
+require $root.'/vendor/autoload.php';
+$manifest = new Illuminate\Foundation\PackageManifest(
+    new Illuminate\Filesystem\Filesystem(), $root, $cacheDirectory.'/packages.php'
+);
+$manifest->build();
+foreach ($manifest->providers() as $provider) {
+    if (!class_exists($provider)) {
+        throw new RuntimeException('The deployment refers to an unavailable package provider.');
+    }
+}
+// An empty service manifest makes Laravel compile its runtime provider list.
+if (file_put_contents($cacheDirectory.'/services.php', "<?php return [];\n") === false) {
+    throw new RuntimeException('Could not reset the staged service manifest.');
+}
+echo "Fresh production package manifest and reset service manifest prepared.\n";
