@@ -12,7 +12,7 @@ variables:
   webAppName: 'stellarPrivateNotesApiProd'
 
   # Agent VM image name
-  vmImageName: 'ubuntu-latest'
+  vmImageName: 'ubuntu-24.04'
 
   # Environment name
   environmentName: 'stellarPrivateNotesApiProd'
@@ -24,21 +24,22 @@ stages:
 - stage: Build
   displayName: Build stage
   variables:
-    phpVersion: '8.2'
+    phpVersion: '8.3'
   jobs:
   - job: BuildJob
     pool:
       vmImage: $(vmImageName)
     steps:
     - script: |
-        sudo update-alternatives --set php /usr/bin/php$(phpVersion)
-        sudo update-alternatives --set phar /usr/bin/phar$(phpVersion)
-        sudo update-alternatives --set phpdbg /usr/bin/phpdbg$(phpVersion)
-        sudo update-alternatives --set php-cgi /usr/bin/php-cgi$(phpVersion)
-        sudo update-alternatives --set phar.phar /usr/bin/phar.phar$(phpVersion)
+        set -eu
+        actual_php=$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')
+        if [ "$actual_php" != "$(phpVersion)" ]; then
+          echo "Expected PHP $(phpVersion), found $actual_php" >&2
+          exit 1
+        fi
         php -version
       workingDirectory: $(rootFolder)
-      displayName: 'Use PHP version $(phpVersion)'
+      displayName: 'Verify installed PHP version $(phpVersion)'
 
     - script: |
         set -e
@@ -53,6 +54,7 @@ stages:
 
     - script: |
         set -eu
+        composer check-platform-reqs --no-dev --no-plugins --no-scripts
         env -i PATH="$PATH" TMPDIR="$(Agent.TempDirectory)" STELLAR_RUNTIME_TEST=1 php tests/runtime-compatibility.php
       workingDirectory: $(rootFolder)
       displayName: 'Test real Laravel runtime with isolated synthetic data'
