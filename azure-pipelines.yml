@@ -47,7 +47,7 @@ stages:
         php tests/security-contract.php
       displayName: 'Check legacy compatibility and conflict contracts'
 
-    - script: composer install --no-interaction --prefer-dist --optimize-autoloader
+    - script: composer install --no-dev --no-plugins --no-interaction --prefer-dist --optimize-autoloader
       workingDirectory: $(rootFolder)
       displayName: 'Composer install'
 
