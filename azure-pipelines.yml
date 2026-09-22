@@ -112,15 +112,12 @@ stages:
             artifact: drop
 
           - task: AzureRmWebAppDeployment@4
-            displayName: 'Deploy Azure Web App and run migrations'
+            displayName: 'Deploy Azure Web App'
             inputs:
               ConnectionType: 'AzureRM'
               azureSubscription: '$(azureSubscription)'
               appType: 'webAppLinux'
               WebAppName: '$(webAppName)'
               packageForLinux: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
-              ScriptType: 'Inline Script'
-              InlineScript: |
-                set -eu
-                cd /home/site/wwwroot
-                php artisan migrate --force --path=database/migrations/2026_09_22_000000_add_edit_session_to_notes.php
+              # The additive edit_session migration was applied and verified in
+              # the PHP app container. Kudu is a separate container without PHP.
