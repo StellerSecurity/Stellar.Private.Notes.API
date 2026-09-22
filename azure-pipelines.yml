@@ -12,7 +12,7 @@ variables:
   webAppName: 'stellarPrivateNotesApiProd'
 
   # Agent VM image name
-  vmImageName: 'ubuntu-latest'
+  vmImageName: 'ubuntu-24.04'
 
   # Environment name
   environmentName: 'stellarPrivateNotesApiProd'
@@ -24,30 +24,68 @@ stages:
 - stage: Build
   displayName: Build stage
   variables:
-    phpVersion: '8.2'
+    phpVersion: '8.3'
   jobs:
   - job: BuildJob
     pool:
       vmImage: $(vmImageName)
     steps:
     - script: |
-        sudo update-alternatives --set php /usr/bin/php$(phpVersion)
-        sudo update-alternatives --set phar /usr/bin/phar$(phpVersion)
-        sudo update-alternatives --set phpdbg /usr/bin/phpdbg$(phpVersion)
-        sudo update-alternatives --set php-cgi /usr/bin/php-cgi$(phpVersion)
-        sudo update-alternatives --set phar.phar /usr/bin/phar.phar$(phpVersion)
+        set -eu
+        actual_php=$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;')
+        if [ "$actual_php" != "$(phpVersion)" ]; then
+          echo "Expected PHP $(phpVersion), found $actual_php" >&2
+          exit 1
+        fi
         php -version
       workingDirectory: $(rootFolder)
-      displayName: 'Use PHP version $(phpVersion)'
+      displayName: 'Verify installed PHP version $(phpVersion)'
 
-    - script: composer install --no-interaction --prefer-dist --optimize-autoloader
+    - script: |
+        set -e
+        php tests/controller-contract.php
+        php tests/known-notes-contract.php
+        php tests/security-contract.php
+      displayName: 'Check legacy compatibility and conflict contracts'
+
+    - script: composer install --no-dev --no-scripts --no-plugins --no-interaction --prefer-dist --optimize-autoloader
       workingDirectory: $(rootFolder)
       displayName: 'Composer install'
+
+    - script: |
+        set -eu
+        composer check-platform-reqs --no-dev --no-plugins --no-scripts
+        env -i PATH="$PATH" TMPDIR="$(Agent.TempDirectory)" STELLAR_RUNTIME_TEST=1 php tests/runtime-compatibility.php
+      workingDirectory: $(rootFolder)
+      displayName: 'Test real Laravel runtime with isolated synthetic data'
+
+    - script: |
+        set -eu
+        mkdir -p "$(Build.ArtifactStagingDirectory)/app"
+        for path in app artisan bootstrap config database default public resources routes vendor composer.json composer.lock; do
+          if [ -e "$path" ]; then
+            rsync -a --exclude='.git' --exclude='.env*' --exclude='auth.json' \
+              --exclude='*.[mM][dD]' --exclude='OPERATIONS.txt' \
+              --exclude='*.key' --exclude='*.pem' --exclude='*.sqlite' \
+              --exclude='hot' --exclude='storage' \
+              "$path" "$(Build.ArtifactStagingDirectory)/app/"
+          fi
+        done
+        mkdir -p "$(Build.ArtifactStagingDirectory)/app/storage/framework/cache/data" \
+          "$(Build.ArtifactStagingDirectory)/app/storage/framework/sessions" \
+          "$(Build.ArtifactStagingDirectory)/app/storage/framework/views" \
+          "$(Build.ArtifactStagingDirectory)/app/storage/logs"
+      workingDirectory: $(rootFolder)
+      displayName: 'Stage application files without repository metadata or local secrets'
+
+    - script: php tests/prepare-linux-artifact.php "$(Build.ArtifactStagingDirectory)/app"
+      workingDirectory: $(rootFolder)
+      displayName: 'Verify the production-only Linux deployment artifact'
 
     - task: ArchiveFiles@2
       displayName: 'Archive files'
       inputs:
-        rootFolderOrFile: '$(rootFolder)'
+        rootFolderOrFile: '$(Build.ArtifactStagingDirectory)/app'
         includeRootFolder: false
         archiveType: zip
         archiveFile: '$(Build.ArtifactStagingDirectory)/$(Build.BuildId).zip'
@@ -60,7 +98,7 @@ stages:
 - stage: Deploy
   displayName: 'Deploy Web App'
   dependsOn: Build
-  condition: succeeded()
+  condition: and(succeeded(), eq(variables['Build.SourceBranch'], 'refs/heads/main'))
   jobs:
   - deployment: DeploymentJob
     pool:
@@ -81,3 +119,8 @@ stages:
               appType: 'webAppLinux'
               WebAppName: '$(webAppName)'
               packageForLinux: '$(Pipeline.Workspace)/drop/$(Build.BuildId).zip'
+              ScriptType: 'Inline Script'
+              InlineScript: |
+                set -eu
+                cd /home/site/wwwroot
+                php artisan migrate --force --path=database/migrations/2026_09_22_000000_add_edit_session_to_notes.php

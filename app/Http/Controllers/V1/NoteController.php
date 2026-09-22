@@ -26,6 +26,7 @@ class NoteController extends Controller
         // Preserve the legacy model-shaped response for older clients, but make
         // the public `id` match the UUID they use for every note operation.
         $payload = $note->toArray();
+        unset($payload['edit_session']); // Device write ownership is never shared with clients.
         unset($payload['folder_entity']); // Keep the legacy find response shape.
         $payload['database_id'] = $payload['id'];
         $payload['id'] = $note->note_id;
@@ -90,6 +91,8 @@ class NoteController extends Controller
             $cm = (int) ($c['last_modified'] ?? 0);
             $sm = (int) $s->last_modified;
 
+            // A deletion is terminal for this UUID, including clients with a fast clock.
+            if ($s->deleted) { $download[] = $id; continue; }
             if ($cm > $sm) { $upload[] = $id; continue; }
             if ($cm < $sm) { $download[] = $id; continue; }
 
@@ -143,8 +146,9 @@ class NoteController extends Controller
         $incomingFolders = collect($req->input('folders', []));
         $incoming = collect($req->input('notes', []));
         $confirmed = true;
+        $causalWritesEnabled = (bool)config('notes_conflicts.enabled', false);
 
-        DB::transaction(function () use ($incomingFolders, $incoming, $userId, &$confirmed) {
+        DB::transaction(function () use ($incomingFolders, $incoming, $userId, &$confirmed, $causalWritesEnabled) {
             foreach ($incomingFolders as $f) {
                 $id = $f['id'] ?? null;
                 if (!$id) {
@@ -166,6 +170,8 @@ class NoteController extends Controller
                     continue;
                 }
 
+                // Reusing a deleted folder UUID must not resurrect it from an offline client.
+                if ($existing->deleted) continue;
                 if ((int)$payload['last_modified'] > (int)$existing->last_modified) {
                     $existing->fill($payload)->save();
                 }
@@ -174,6 +180,13 @@ class NoteController extends Controller
             foreach ($incoming as $n) {
                 $id = $n['id'];
                 $existing = Note::where('user_id',$userId)->where('note_id',$id)->lockForUpdate()->first();
+
+                // Deleted UUIDs are terminal. Restoring content must use a new UUID.
+                // A stale device's wall clock must never resurrect a removed note.
+                if ($existing && $existing->deleted && empty($n['deleted'])) {
+                    $confirmed = false;
+                    continue;
+                }
 
                 // Reject stale replays before folder resolution can change shared metadata.
                 if ($existing && (int)($n['last_modified'] ?? 0) <= (int)$existing->last_modified) {
@@ -191,6 +204,22 @@ class NoteController extends Controller
                     }
                     $confirmed = $confirmed && $sameVersion && $sameContent;
                     continue;
+                }
+
+                // Optional causal guard. Legacy payloads retain their existing contract.
+                // Continued writes from the same editing session are safe until another
+                // device (including an old app) becomes the last writer.
+                if ($causalWritesEnabled && array_key_exists('base_version', $n)) {
+                    $base = $n['base_version'];
+                    $session = $n['edit_session'] ?? null;
+                    $valid = is_int($base) && $base >= 0 && is_string($session)
+                        && preg_match('/^[a-zA-Z0-9-]{16,64}$/D', $session) === 1;
+                    $ownSession = $valid && $existing && is_string($existing->edit_session)
+                        && hash_equals($existing->edit_session, $session);
+                    if (!$valid || ($existing ? (!$ownSession && $base !== (int)$existing->last_modified) : $base !== 0)) {
+                        $confirmed = false;
+                        continue;
+                    }
                 }
 
                 if ($existing) {
@@ -223,6 +252,9 @@ class NoteController extends Controller
                     'folder_id'     => $resolvedFolderId,
                     'folder'        => $resolvedFolderName,
                 ];
+
+                // Deploy disabled first; enable only after the additive migration.
+                if ($causalWritesEnabled) $payload['edit_session'] = array_key_exists('base_version', $n) ? ($n['edit_session'] ?? null) : null;
 
                 if (!$existing) {
                     Note::create(array_merge($payload, [
