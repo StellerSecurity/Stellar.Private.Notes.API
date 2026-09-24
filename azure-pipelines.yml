@@ -44,6 +44,7 @@ stages:
     - script: |
         set -e
         php tests/controller-contract.php
+        php tests/performance-meter.php
         php tests/known-notes-contract.php
         php tests/security-contract.php
       displayName: 'Check legacy compatibility and conflict contracts'
@@ -55,6 +56,7 @@ stages:
     - script: |
         set -eu
         composer check-platform-reqs --no-dev --no-plugins --no-scripts
+        php tests/performance-runtime.php
         env -i PATH="$PATH" TMPDIR="$(Agent.TempDirectory)" STELLAR_RUNTIME_TEST=1 php tests/runtime-compatibility.php
       workingDirectory: $(rootFolder)
       displayName: 'Test real Laravel runtime with isolated synthetic data'

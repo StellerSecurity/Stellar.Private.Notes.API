@@ -13,6 +13,7 @@ return Application::configure(basePath: dirname(__DIR__))
     )
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->use([
+            \App\Http\Middleware\MeasurePerformance::class,
             // Preserve legacy empty strings and whitespace in encrypted payloads.
             \Illuminate\Http\Middleware\HandleCors::class,
             \Illuminate\Foundation\Http\Middleware\ValidatePostSize::class,
