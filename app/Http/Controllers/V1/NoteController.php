@@ -177,9 +177,21 @@ class NoteController extends Controller
                 }
             }
 
+            // One locking read avoids a cross-region database round trip per note.
+            // Keep the transaction and row locks: concurrent uploads must still
+            // compare against the committed version before changing any content.
+            $noteIds = [];
+            foreach ($incoming as $n) $noteIds[] = $n['id'];
+            $lockedNotes = [];
+            if ($noteIds !== []) {
+                foreach (Note::where('user_id', $userId)->whereIn('note_id', array_values(array_unique($noteIds)))
+                    ->orderBy('id', 'asc')->lockForUpdate()->get() as $row) {
+                    $lockedNotes[$row->note_id] ??= $row;
+                }
+            }
             foreach ($incoming as $n) {
                 $id = $n['id'];
-                $existing = Note::where('user_id',$userId)->where('note_id',$id)->lockForUpdate()->first();
+                $existing = $lockedNotes[$id] ?? null;
 
                 // Deleted UUIDs are terminal. Restoring content must use a new UUID.
                 // A stale device's wall clock must never resurrect a removed note.
@@ -257,7 +269,7 @@ class NoteController extends Controller
                 if ($causalWritesEnabled) $payload['edit_session'] = array_key_exists('base_version', $n) ? ($n['edit_session'] ?? null) : null;
 
                 if (!$existing) {
-                    Note::create(array_merge($payload, [
+                    $lockedNotes[$id] = Note::create(array_merge($payload, [
                         'user_id' => $userId,
                         'note_id' => $id,
                     ]));
