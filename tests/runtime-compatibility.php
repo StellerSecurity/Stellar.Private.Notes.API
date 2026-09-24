@@ -80,6 +80,20 @@ try {
     checkRuntime($call('upload',['notes'=>[$delete]])===[200,['ok'=>true]],'old client can delete guarded note');
     checkRuntime($call('upload',['notes'=>[array_replace($legacy,['last_modified'=>900001])]])===[200,['ok'=>true]],'legacy replay keeps legacy response');
     checkRuntime($call('download')[1]['notes'][0]['deleted']===true,'offline replay does not resurrect deleted note');
+    $bulk=[];$seed=[];
+    for($i=0;$i<831;$i++) {
+        $bulk[]=['id'=>'bulk-'.$i,'text'=>'synthetic','last_modified'=>100];
+        $seed[]=['user_id'=>21,'note_id'=>'bulk-'.$i,'title'=>'','text'=>'synthetic','last_modified'=>100];
+    }
+    Illuminate\Support\Facades\DB::table('notes')->insert($seed);
+    $reads=0;
+    Illuminate\Support\Facades\DB::listen(function($q)use(&$reads){if(str_starts_with(strtolower($q->sql),'select')&&str_contains($q->sql,'notes'))$reads++;});
+    checkRuntime($call('upload',['user_id'=>21,'notes'=>$bulk])===[200,['ok'=>true]],'831-note unchanged legacy upload accepted');
+    checkRuntime($reads===1,'831-note upload uses one note lookup instead of 831');
+    $duplicates=[['id'=>'duplicate-batch','text'=>'first','last_modified'=>100],['id'=>'duplicate-batch','text'=>'second','last_modified'=>200],['id'=>'duplicate-batch','text'=>'stale','last_modified'=>150]];
+    checkRuntime($call('upload',['user_id'=>21,'notes'=>$duplicates])[0]===200,'duplicate IDs within legacy batch accepted');
+    checkRuntime(App\Models\Note::where('user_id',21)->where('note_id','duplicate-batch')->count()===1,'duplicate batch creates one row');
+    checkRuntime(App\Models\Note::where('user_id',21)->where('note_id','duplicate-batch')->first()->text==='second','duplicate batch preserves newest version');
     echo 'Runtime compatibility: '.$checks.' checks passed; PHP '.PHP_VERSION.'; Laravel '.$app->version()."\n";
 } catch (Throwable $e) {
     // No request payloads, environment values or remote bodies in failure output.
