@@ -149,13 +149,27 @@ class NoteController extends Controller
         $causalWritesEnabled = (bool)config('notes_conflicts.enabled', false);
 
         DB::transaction(function () use ($incomingFolders, $incoming, $userId, &$confirmed, $causalWritesEnabled) {
+            // Legacy clients send their complete folder snapshot on each upload.
+            // Acquire those rows once, in a consistent order, instead of holding
+            // the first lock across a database round trip for every folder.
+            $folderIds = [];
+            foreach ($incomingFolders as $f) {
+                if (!empty($f['id'])) $folderIds[] = $f['id'];
+            }
+            $lockedFolders = [];
+            if ($folderIds !== []) {
+                foreach (Folder::where('user_id', $userId)->whereIn('folder_id', array_values(array_unique($folderIds)))
+                    ->orderBy('id', 'asc')->lockForUpdate()->get() as $row) {
+                    $lockedFolders[$row->folder_id] ??= $row;
+                }
+            }
             foreach ($incomingFolders as $f) {
                 $id = $f['id'] ?? null;
                 if (!$id) {
                     continue;
                 }
 
-                $existing = Folder::where('user_id',$userId)->where('folder_id',$id)->lockForUpdate()->first();
+                $existing = $lockedFolders[$id] ?? null;
                 $payload = [
                     'name' => trim((string)($f['name'] ?? '')),
                     'last_modified' => (int)($f['last_modified'] ?? 0),
@@ -163,7 +177,7 @@ class NoteController extends Controller
                 ];
 
                 if (!$existing) {
-                    Folder::create(array_merge($payload, [
+                    $lockedFolders[$id] = Folder::create(array_merge($payload, [
                         'user_id' => $userId,
                         'folder_id' => $id,
                     ]));
