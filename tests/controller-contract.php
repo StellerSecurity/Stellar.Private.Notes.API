@@ -12,6 +12,7 @@ namespace Contract {
         public function values() { return array_values($this->items); }
     }
     class Query {
+        public static array $reads=[];
         private array $filters=[]; private array $orders=[]; private $folderOwner=null;
         public function __construct(private string $model) {}
         public function where($field,$value) { $this->filters[]=fn($r)=>$r->$field==$value; return $this; }
@@ -28,6 +29,7 @@ namespace Contract {
         public function lockForUpdate() { return $this; }
         public function when($condition,$fn) { return $condition ? $fn($this) : $this; }
         public function get($columns=['*']) {
+            self::$reads[$this->model]=(self::$reads[$this->model]??0)+1;
             $rows=array_values(array_filter($this->model::$rows,fn($r)=>array_reduce($this->filters,fn($ok,$f)=>$ok&&$f($r),true)));
             usort($rows,function($a,$b) { foreach($this->orders as [$f,$direction]) { $v=$a->$f<=>$b->$f; if($v) return $direction==='desc'?-$v:$v; } return 0; });
             foreach ($rows as $row) $row->relationOwner=$this->folderOwner;
@@ -159,6 +161,31 @@ namespace {
     check('old client write invalidates previous modern session',$controller->upload(request(['require_note_ack'=>true,'notes'=>[$second]]))->status===409);
     $invalid=$second; $invalid['base_version']='500';
     check('malformed causal version rejected',$controller->upload(request(['require_note_ack'=>true,'notes'=>[$invalid]]))->status===409);
+
+    $bulkFolders=[];
+    for($i=0;$i<98;$i++) {
+        $bulkFolders[]=['id'=>'folder-bulk-'.$i,'name'=>'Folder '.$i,'last_modified'=>100,'deleted'=>false];
+        \App\Models\Folder::create(['user_id'=>1,'folder_id'=>'folder-bulk-'.$i,'name'=>'Folder '.$i,'last_modified'=>100,'deleted'=>false]);
+    }
+    \Contract\Query::$reads=[];
+    $bulkResponse=$controller->upload(request(['folders'=>$bulkFolders,'notes'=>[]]));
+    check('98 unchanged legacy folders preserve exact upload response',$bulkResponse->status===200 && $bulkResponse->data===['ok'=>true]);
+    check('98 unchanged folders use one locking read',(\Contract\Query::$reads[\App\Models\Folder::class]??0)===1);
+    $controller->upload(request(['folders'=>[
+        ['id'=>'folder-new-duplicate','name'=>'Initial','last_modified'=>100],
+        ['id'=>'folder-new-duplicate','name'=>'Newest','last_modified'=>300],
+        ['id'=>'folder-new-duplicate','name'=>'Stale','last_modified'=>200],
+        ['id'=>'collision','name'=>'My renamed folder','last_modified'=>400],
+    ]]));
+    $duplicates=array_values(array_filter(\App\Models\Folder::$rows,fn($f)=>$f->user_id===1 && $f->folder_id==='folder-new-duplicate'));
+    check('new duplicate folder IDs share the inserted row',count($duplicates)===1 && $duplicates[0]->name==='Newest' && $duplicates[0]->last_modified===300);
+    check('batch folders remain scoped to authenticated account',\App\Models\Folder::where('user_id',2)->where('folder_id','collision')->first()->name==='OTHER USER PRIVATE NAME');
+    $controller->upload(request(['folders'=>[['id'=>'folder-new-duplicate','name'=>'','last_modified'=>400,'deleted'=>true]]]));
+    $controller->upload(request(['folders'=>[['id'=>'folder-new-duplicate','name'=>'Revived','last_modified'=>999999]]]));
+    check('batch folder upload does not revive deleted folders',$duplicates[0]->deleted===true && $duplicates[0]->last_modified===400);
+    \Contract\Query::$reads=[];
+    $controller->upload(request(['folders'=>[['name'=>'No id'],['id'=>'']],'notes'=>[]]));
+    check('empty or invalid folder IDs cause no unscoped locking read',(\Contract\Query::$reads[\App\Models\Folder::class]??0)===0);
 
     $GLOBALS['conflictsEnabled']=false;
     upload([['id'=>'pre-migration','text'=>'safe before migration','last_modified'=>1,'base_version'=>0,'edit_session'=>'new-client-111111111']]);
