@@ -13,6 +13,7 @@ namespace Contract {
     }
     class Query {
         public static array $reads=[];
+        public static array $selected=[];
         private array $filters=[]; private array $orders=[]; private $folderOwner=null;
         public function __construct(private string $model) {}
         public function where($field,$value) { $this->filters[]=fn($r)=>$r->$field==$value; return $this; }
@@ -31,6 +32,7 @@ namespace Contract {
         public function get($columns=['*']) {
             self::$reads[$this->model]=(self::$reads[$this->model]??0)+1;
             $rows=array_values(array_filter($this->model::$rows,fn($r)=>array_reduce($this->filters,fn($ok,$f)=>$ok&&$f($r),true)));
+            self::$selected[]=['model'=>$this->model,'columns'=>$columns,'ids'=>array_map(fn($r)=>$r->id,$rows)];
             usort($rows,function($a,$b) { foreach($this->orders as [$f,$direction]) { $v=$a->$f<=>$b->$f; if($v) return $direction==='desc'?-$v:$v; } return 0; });
             foreach ($rows as $row) $row->relationOwner=$this->folderOwner;
             return new Rows($rows);
@@ -192,4 +194,24 @@ namespace {
     $pre=\App\Models\Note::where('user_id',1)->where('note_id','pre-migration')->first();
     check('disabled rollout does not write new database column',!array_key_exists('edit_session',$pre->data));
 
+    // Restrict the initial canonical lookup, while retaining account isolation
+    // and newest-version selection for databases containing legacy duplicates.
+    $oldTarget=\App\Models\Note::create(['user_id'=>1,'note_id'=>'target-only','text'=>'old','last_modified'=>100]);
+    $newTarget=\App\Models\Note::create(['user_id'=>1,'note_id'=>'target-only','text'=>'new','last_modified'=>200]);
+    \App\Models\Note::create(['user_id'=>2,'note_id'=>'target-only','text'=>'other account','last_modified'=>900]);
+    \Contract\Query::$selected=[];
+    $target=download(['ids'=>['target-only','target-only']]);
+    check('targeted download selects newest own duplicate',count($target['notes'])===1 && $target['notes'][0]['text']==='new');
+    check('canonical lookup materializes only requested own notes',\Contract\Query::$selected[0]['ids']===[$oldTarget->id,$newTarget->id]);
+    check('targeted find retains newest duplicate',$controller->find(request(['id'=>'target-only']))->data['text']==='new');
+    $oldFolder=\App\Models\Folder::create(['user_id'=>1,'folder_id'=>'target-folder','name'=>'old','last_modified'=>100]);
+    $newFolder=\App\Models\Folder::create(['user_id'=>1,'folder_id'=>'target-folder','name'=>'new','last_modified'=>200]);
+    \App\Models\Folder::create(['user_id'=>2,'folder_id'=>'target-folder','name'=>'other account','last_modified'=>900]);
+    \Contract\Query::$selected=[];
+    $target=download(['ids'=>['target-only'],'folder_ids'=>['target-folder']]);
+    check('targeted folder selects newest own duplicate',count($target['folders'])===1 && $target['folders'][0]['name']==='new');
+    $folderSelects=array_values(array_filter(\Contract\Query::$selected,fn($q)=>$q['model']===\App\Models\Folder::class));
+    check('canonical folder lookup materializes only requested own folders',$folderSelects[0]['ids']===[$oldFolder->id,$newFolder->id]);
+    check('invalid targeted IDs do not become a full download',download(['ids'=>[null,[],false,'']])['notes']===[]);
+    check('empty legacy ID list keeps full download',download(['ids'=>[]])===download());
 }

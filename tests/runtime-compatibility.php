@@ -90,6 +90,13 @@ try {
     Illuminate\Support\Facades\DB::listen(function($q)use(&$reads){if(str_starts_with(strtolower($q->sql),'select')&&str_contains($q->sql,'notes'))$reads++;});
     checkRuntime($call('upload',['user_id'=>21,'notes'=>$bulk])===[200,['ok'=>true]],'831-note unchanged legacy upload accepted');
     checkRuntime($reads===1,'831-note upload uses one note lookup instead of 831');
+    $targetedNoteQueries=[];
+    Illuminate\Support\Facades\DB::listen(function($q)use(&$targetedNoteQueries){
+        if(str_starts_with(strtolower($q->sql),'select')&&str_contains($q->sql,'notes')) $targetedNoteQueries[]=[$q->sql,$q->bindings];
+    });
+    $targeted=$call('download',['user_id'=>21,'ids'=>['bulk-830']]);
+    checkRuntime($targeted[0]===200 && count($targeted[1]['notes'])===1 && $targeted[1]['notes'][0]['id']==='bulk-830','targeted download returns only the requested note');
+    checkRuntime(str_contains($targetedNoteQueries[0][0],'note_id') && in_array('bulk-830',$targetedNoteQueries[0][1],true),'targeted download filters the first canonical note lookup by note_id');
     $bulkFolders=[];$folderSeed=[];
     for($i=0;$i<98;$i++) {
         $bulkFolders[]=['id'=>'bulk-folder-'.$i,'name'=>'Synthetic '.$i,'last_modified'=>100,'deleted'=>false];

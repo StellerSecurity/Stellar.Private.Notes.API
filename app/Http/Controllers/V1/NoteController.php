@@ -14,9 +14,9 @@ use Illuminate\Support\Str;
 class NoteController extends Controller
 {
     public function find(Request $request) {
-        $note = $this->canonicalNoteQuery((int) $request->input('user_id'))
+        $noteId = $request->input('id');
+        $note = $this->canonicalNoteQuery((int) $request->input('user_id'), [$noteId])
             ->with(['folderEntity' => fn($q) => $q->where('user_id', $request->input('user_id'))])
-            ->where('note_id', $request->input('id'))
             ->first();
 
         if (! $note) {
@@ -73,13 +73,11 @@ class NoteController extends Controller
             );
         }
 
-        $server = $this->canonicalNoteQuery($userId)
-            ->whereIn('note_id', $client->keys())
+        $server = $this->canonicalNoteQuery($userId, $client->keys()->all())
             ->get()
             ->keyBy('note_id');
 
-        $serverFolders = $this->canonicalFolderQuery($userId)
-            ->whereIn('folder_id', $clientFolders->keys())
+        $serverFolders = $this->canonicalFolderQuery($userId, $clientFolders->keys()->all())
             ->get()
             ->keyBy('folder_id');
 
@@ -311,9 +309,8 @@ class NoteController extends Controller
         // Older apps omit this field and receive the unchanged full response.
         $knownNotes = $req->input('known_notes');
 
-        $notes = $this->canonicalNoteQuery($userId)
+        $notes = $this->canonicalNoteQuery($userId, $ids ?: null)
             ->with(['folderEntity' => fn($q) => $q->where('user_id', $userId)])
-            ->when($ids, fn($q)=>$q->whereIn('note_id',$ids))
             ->get()
             ->filter(fn($n) => KnownNotes::shouldDownload(
                 $knownNotes, (string)$n->note_id, (int)$n->last_modified, (bool)$n->deleted
@@ -333,8 +330,7 @@ class NoteController extends Controller
                 'folder'        => $n->folderEntity?->name ?? $n->folder ?? '',
             ])->values();
 
-        $folders = $this->canonicalFolderQuery($userId)
-            ->when($folderIds, fn($q) => $q->whereIn('folder_id', $folderIds))
+        $folders = $this->canonicalFolderQuery($userId, $folderIds ?: null)
             ->get()->map(fn($f) => [
                 'id' => $f->folder_id,
                 'name' => $f->name,
@@ -346,9 +342,18 @@ class NoteController extends Controller
     }
 
 
-    private function canonicalNoteQuery(int|string $userId)
+    private function canonicalNoteQuery(int|string $userId, ?array $noteIds = null)
     {
-        $ids = Note::where('user_id', $userId)
+        $scope = Note::where('user_id', $userId);
+        if ($noteIds !== null) {
+            $noteIds = $this->cleanSyncIds($noteIds);
+            if ($noteIds === []) {
+                return Note::where('user_id', $userId)->whereKey([]);
+            }
+            $scope->whereIn('note_id', $noteIds);
+        }
+
+        $ids = $scope
             ->orderBy('last_modified', 'desc')
             ->orderBy('id', 'desc')
             ->get(['id', 'note_id'])
@@ -359,9 +364,18 @@ class NoteController extends Controller
         return Note::where('user_id', $userId)->whereKey($ids);
     }
 
-    private function canonicalFolderQuery(int|string $userId)
+    private function canonicalFolderQuery(int|string $userId, ?array $folderIds = null)
     {
-        $ids = Folder::where('user_id', $userId)
+        $scope = Folder::where('user_id', $userId);
+        if ($folderIds !== null) {
+            $folderIds = $this->cleanSyncIds($folderIds);
+            if ($folderIds === []) {
+                return Folder::where('user_id', $userId)->whereKey([]);
+            }
+            $scope->whereIn('folder_id', $folderIds);
+        }
+
+        $ids = $scope
             ->orderBy('last_modified', 'desc')
             ->orderBy('id', 'desc')
             ->get(['id', 'folder_id'])
@@ -369,6 +383,21 @@ class NoteController extends Controller
             ->modelKeys();
 
         return Folder::where('user_id', $userId)->whereKey($ids);
+    }
+
+    private function cleanSyncIds(array $ids): array
+    {
+        $clean = [];
+        foreach ($ids as $id) {
+            if (! is_string($id) && ! is_int($id)) {
+                continue;
+            }
+            $id = trim((string) $id);
+            if ($id !== '') {
+                $clean[] = $id;
+            }
+        }
+        return array_values(array_unique($clean));
     }
 
     private function resolveFolderForIncomingNote(int|string $userId, array $note): array
