@@ -96,7 +96,29 @@ try {
     });
     $targeted=$call('download',['user_id'=>21,'ids'=>['bulk-830']]);
     checkRuntime($targeted[0]===200 && count($targeted[1]['notes'])===1 && $targeted[1]['notes'][0]['id']==='bulk-830','targeted download returns only the requested note');
-    checkRuntime((bool)array_filter($targetedNoteQueries,fn($query)=>str_contains($query[0],'note_id') && in_array('bulk-830',$query[1],true)),'targeted download filters canonical note lookup by note_id');
+    checkRuntime(str_contains($targetedNoteQueries[0][0],'note_id') && in_array('bulk-830',$targetedNoteQueries[0][1],true),'targeted download filters the first canonical note lookup by note_id');
+    $bulkFolders=[];$folderSeed=[];
+    for($i=0;$i<98;$i++) {
+        $bulkFolders[]=['id'=>'bulk-folder-'.$i,'name'=>'Synthetic '.$i,'last_modified'=>100,'deleted'=>false];
+        $folderSeed[]=['user_id'=>21,'folder_id'=>'bulk-folder-'.$i,'name'=>'Synthetic '.$i,'last_modified'=>100];
+    }
+    Illuminate\Support\Facades\DB::table('folders')->insert($folderSeed);
+    $folderReads=0;
+    Illuminate\Support\Facades\DB::listen(function($q)use(&$folderReads){if(str_starts_with(strtolower($q->sql),'select')&&str_contains($q->sql,'folders'))$folderReads++;});
+    $reads=0;
+    checkRuntime($call('upload',['user_id'=>21,'notes'=>$bulk,'folders'=>$bulkFolders])===[200,['ok'=>true]],'831 notes plus 98 unchanged folders retain legacy response');
+    checkRuntime($folderReads===1 && $reads===1,'large legacy snapshot uses two lookups instead of 99');
+    $dupeFolders=[['id'=>'duplicate-folder','name'=>'first','last_modified'=>100],['id'=>'duplicate-folder','name'=>'newest','last_modified'=>300],['id'=>'duplicate-folder','name'=>'stale','last_modified'=>200]];
+    checkRuntime($call('upload',['folders'=>$dupeFolders])[0]===200,'duplicate folder IDs accepted within a single upload');
+    $folderRows=Illuminate\Support\Facades\DB::table('folders')->where('user_id',11)->where('folder_id','duplicate-folder')->get();
+    checkRuntime(count($folderRows)===1 && $folderRows[0]->name==='newest','duplicate folders preserve the latest version in a single row');
+    Illuminate\Support\Facades\DB::table('folders')->insert(['user_id'=>12,'folder_id'=>'duplicate-folder','name'=>'Other account','last_modified'=>100]);
+    $call('upload',['folders'=>[['id'=>'duplicate-folder','name'=>'Renamed','last_modified'=>400]]]);
+    checkRuntime(Illuminate\Support\Facades\DB::table('folders')->where('user_id',12)->where('folder_id','duplicate-folder')->value('name')==='Other account','batch locking isolates the same folder ID across accounts');
+    $call('upload',['folders'=>[['id'=>'duplicate-folder','name'=>'','deleted'=>true,'last_modified'=>500]]]);
+    $call('upload',['folders'=>[['id'=>'duplicate-folder','name'=>'Offline replay','last_modified'=>900000]]]);
+    $deletedFolder=Illuminate\Support\Facades\DB::table('folders')->where('user_id',11)->where('folder_id','duplicate-folder')->first();
+    checkRuntime((bool)$deletedFolder->deleted && (int)$deletedFolder->last_modified===500,'batched folder retry never revives a tombstone');
     $duplicates=[['id'=>'duplicate-batch','text'=>'first','last_modified'=>100],['id'=>'duplicate-batch','text'=>'second','last_modified'=>200],['id'=>'duplicate-batch','text'=>'stale','last_modified'=>150]];
     checkRuntime($call('upload',['user_id'=>21,'notes'=>$duplicates])[0]===200,'duplicate IDs within legacy batch accepted');
     checkRuntime(App\Models\Note::where('user_id',21)->where('note_id','duplicate-batch')->count()===1,'duplicate batch creates one row');
