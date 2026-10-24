@@ -8,6 +8,11 @@ server {
     server_name  example.com www.example.com;
     port_in_redirect off;
 
+    # Encrypted image notes need room for base64 and encryption overhead.
+    client_max_body_size 64m;
+
+    location = /.user.ini { deny all; }
+
     location / {
         index  index.php index.html index.htm hostingstart.html;
         try_files $uri $uri/ /index.php?$args; # Changed for Laravel
